@@ -1,3 +1,4 @@
+#define MAX_USER_PAGES (1024)
 #ifndef CONST_H
 #define CONST_H
 
