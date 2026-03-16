@@ -54,6 +54,97 @@ uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofd
 // TODO: add support for mmap and munmap syscall.
 // hint: read through docstrings in vm.c. Watching CH4 video may also help.
 // Note the return value and PTE flags (especially U,X,W,R)
+
+uint64 sys_mmap(uint64 start, uint64 length, int port, int flags, int fd)
+{
+	struct proc *p = curr_proc();
+
+	// Upper limit is 1GiB (1024 * 1024 * 1024 bytes)
+    if (length > 1073741824) { 
+        return -1; // Return -1 for error
+    }
+
+	if(length == 0){
+		return 0;
+	}
+
+	if(start % PGSIZE != 0){
+		return -1;
+	}
+
+    // Validate Port Permissions
+    // port 8~0x7==0, other bits of port must be 0
+    if ((port & ~0x7) != 0) {
+        return -1; // Return -1 for error
+    }
+    // port & 0x7 != 0, unreadable non-writable non-executable memory is meaningless [cite: 49]
+    if ((port & 0x7) == 0) {
+        return -1; // Return -1 for error
+    }
+	// Translate 'port' bits to your OS's PTE flags
+    // Bit 0: readable, Bit 1: writable, Bit 2: executable
+    int pte_flags = PTE_U; // User mode flag
+    if (port & 1) pte_flags |= PTE_R;
+    if (port & 2) pte_flags |= PTE_W;
+    if (port & 4) pte_flags |= PTE_X;
+
+	uint64 aligned_length = PGROUNDDOWN(start);
+
+	for(uint64 i = start; i<start+length; i+=PGSIZE){
+		if(walkaddr(p->pagetable, i) != 0){
+			return -1; // if the page is not mapped, return -1
+		}
+	}
+
+	while (aligned_length < length)
+	{
+		void* pa = kalloc();
+		if ((uint64) pa == 0)
+		{
+			uvmunmap(p->pagetable, start, (aligned_length - start) / PGSIZE, 1); // unmap the pages that have been mapped, free the physical memory
+			return -1;
+		}
+
+		memset(pa, 0, PGSIZE); // zero the page
+
+		if (mappages(p->pagetable, start, PGSIZE, (uint64) pa, pte_flags) != 0)
+		{
+			kfree(pa); // free the allocated page
+			uvmunmap(p->pagetable, start, (aligned_length - start) / PGSIZE, 1); // unmap the pages that have been mapped, free the physical
+			return -1;
+		}
+		aligned_length += PGSIZE;
+		start += PGSIZE;
+	}	
+
+	// Return 0 for success
+    return 0;
+}
+
+int sys_munmap(uint64 start, uint64 len)
+{
+	struct proc *p = curr_proc();
+	pagetable_t table = p->pagetable; // pagetable
+	
+	// if start isn't aligned with a page start
+	if (start % PGSIZE != 0)
+	{
+		return -1;
+	}
+	
+	int num_pages = PGROUNDUP(len) / PGSIZE;
+
+	for (uint64 page = start; page < start + num_pages * PGSIZE; page += PGSIZE)
+	{	
+		if(useraddr(table, page) == 0)
+		{
+			return -1; // if the page is not mapped, return -1
+		}
+		uvmunmap(table, page, 1, 0); // unmap the page, do not free the physical memory
+	}
+
+	return 0;
+}
 /*
 * LAB1: you may need to define sys_task_info here
 */
@@ -62,13 +153,13 @@ uint64 sys_task_info(TaskInfo *info)
 
 	struct proc *p = curr_proc();
 
-       info->status = Running;
-       for(int i = 0; i < MAX_SYSCALL_NUM; ++i){
-	       info->syscall_times[i] = p->syscall_times[i];
-       }
-       uint64 current_time = get_cycle() * 1000 / CPU_FREQ;
-       info->time = (int)(current_time - p->start_time);
-       return 0;
+	info->status = Running;
+	for(int i = 0; i < MAX_SYSCALL_NUM; ++i){
+		info->syscall_times[i] = p->syscall_times[i];
+	}
+	uint64 current_time = get_cycle() * 1000 / CPU_FREQ;
+	info->time = (int)(current_time - p->start_time);
+	return 0;
 }
 
 uint64 sys_getpid()
@@ -104,6 +195,12 @@ void syscall()
 		break;
 	case SYS_gettimeofday:
 		ret = sys_gettimeofday((TimeVal *)args[0], args[1]);
+		break;
+	case SYS_mmap:
+		ret = sys_mmap(args[0], args[1], args[2], args[3], args[4]);
+		break;
+	case SYS_munmap:
+		ret = sys_munmap(args[0], args[1]);
 		break;
 	/*
 	* LAB1: you may need to add SYS_taskinfo case here
