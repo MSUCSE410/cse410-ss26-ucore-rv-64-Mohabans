@@ -70,12 +70,12 @@ uint64 sys_mmap(uint64 start, uint64 length, int port, int flags, int fd)
 		return -1;
 	}
 
-	// Upper limit is 1GiB [cite: 37]
+	// Upper limit is 1GiB
     if (length > 1073741824) { 
         return -1;
     }
 
-    // Length of mapped byte can be 0 (if yes, return directly) [cite: 37]
+    // Length of mapped byte can be 0 (if yes, return directly)
 	if (length == 0) {
 		return 0;
 	}
@@ -84,16 +84,16 @@ uint64 sys_mmap(uint64 start, uint64 length, int port, int flags, int fd)
 		return -1;
 	}
 
-    // port 8~0x7==0, other bits of port must be 0 [cite: 48]
+    // port 8~0x7==0, other bits of port must be 0
     if ((port & ~0x7) != 0) {
         return -1; 
     }
-    // port & 0x7 != 0, unreadable non-writable non-executable memory is meaningless [cite: 49]
+    // port & 0x7 != 0, unreadable non-writable non-executable memory is meaningless
     if ((port & 0x7) == 0) {
         return -1; 
     }
 
-    // Bit 0 indicates readable, bit 1 indicates writable, bit 2 indicates executable [cite: 38]
+    // Bit 0 indicates readable, bit 1 indicates writable, bit 2 indicates executable
     int pte_flags = PTE_U; 
     if (port & 1) pte_flags |= PTE_R;
     if (port & 2) pte_flags |= PTE_W;
@@ -101,20 +101,20 @@ uint64 sys_mmap(uint64 start, uint64 length, int port, int flags, int fd)
 
 	uint64 end = PGROUNDUP(start + length);
 
-    // Error: [addr, addr + len) A page already mapped exists [cite: 46]
+    // Error: [addr, addr + len) A page already mapped exists
 	for (uint64 va = start; va < end; va += PGSIZE) {
 		if (walkaddr(p->pagetable, va) != 0) {
 			return -1; 
 		}
 	}
 
-    // Request an anonymous physical memory and map it to the virtual memory [cite: 32]
+    // Request an anonymous physical memory and map it to the virtual memory
 	for (uint64 va = start; va < end; va += PGSIZE)
 	{
 		void* pa = kalloc();
 		if ((uint64)pa == 0)
 		{
-            // Error: Insufficient physical memory [cite: 47]
+            // Error: Insufficient physical memory
 			uvmunmap(p->pagetable, start, (va - start) / PGSIZE, 1); 
 			return -1;
 		}
@@ -129,7 +129,7 @@ uint64 sys_mmap(uint64 start, uint64 length, int port, int flags, int fd)
 		}
 	}	
 
-	// Return values: 0 for success [cite: 44]
+	// Return values: 0 for success
     return 0;
 }
 
@@ -146,7 +146,7 @@ uint64 sys_munmap(uint64 start, uint64 len)
 	uint64 end = PGROUNDUP(start + len);
     uint64 num_pages = (end - start) / PGSIZE;
 
-    // Error: Unmapped virtual memory exists in [start, start + len) [cite: 57]
+    // Error: Unmapped virtual memory exists in [start, start + len)
 	for (uint64 page = start; page < end; page += PGSIZE)
 	{	
 		if (walkaddr(table, page) == 0)
@@ -155,7 +155,7 @@ uint64 sys_munmap(uint64 start, uint64 len)
 		}
 	}
 
-    // Unmap a block of virtual memory and free the physical pages [cite: 55]
+    // Unmap a block of virtual memory and free the physical pages
     uvmunmap(table, start, num_pages, 1);
 
 	return 0;
