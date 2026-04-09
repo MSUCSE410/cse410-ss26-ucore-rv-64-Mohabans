@@ -323,7 +323,9 @@ int sys_fstat(int fd, uint64 stat) {
     Stat st;
     st.dev = 0;           // Per assignment specs
     st.ino = ip->inum;
-    st.mode = (ip->type == T_DIR) ? 0x040000 : 0x10000; 
+	
+    st.mode = (ip->type == T_DIR) ? 0x040000 : 0x100000; 
+    
     st.nlink = ip->nlink;
     
     // Copy the struct out to user space
