@@ -195,7 +195,7 @@ void ivalid(struct inode *ip)
 		// Read the link count from disk
 		ip->nlink = dip->nlink;
 		
-		// THE FIX: Protect pre-installed files created by mkfs!
+
 		// If the disk says the file exists but has 0 links, force it to 1.
 		if (ip->type != 0 && ip->nlink == 0) {
 			ip->nlink = 1;
@@ -378,8 +378,7 @@ int dirremove(struct inode *dp, char *name) {
     //Iterate through the directory entries using the directory's size
     for (off = 0; off < dp->size; off += sizeof(de)) {
         
-        // Read the directory entry from the disk into 'de'
-        // readi args: inode, user_dst (0 for kernel), dest address, offset, length
+        // Read the directory entry from the disk into de
         if (readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de)) {
             panic("dirremove: readi");
         }

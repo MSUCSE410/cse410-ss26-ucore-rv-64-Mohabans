@@ -323,7 +323,7 @@ int sys_fstat(int fd, uint64 stat) {
     Stat st;
     st.dev = 0;           // Per assignment specs
     st.ino = ip->inum;
-	
+
     st.mode = (ip->type == T_DIR) ? 0x040000 : 0x100000; 
     
     st.nlink = ip->nlink;
@@ -344,7 +344,6 @@ int sys_linkat(int olddirfd, uint64 oldpath, int newdirfd, uint64 newpath, uint6
     if (copyinstr(p->pagetable, old_str, oldpath, MAX_STR_LEN) < 0) return -1;
     if (copyinstr(p->pagetable, new_str, newpath, MAX_STR_LEN) < 0) return -1;
 
-    // THE FIX: The assignment requires failing if linking a file with the same name
     if (strncmp(old_str, new_str, MAX_STR_LEN) == 0) {
         return -1;
     }
