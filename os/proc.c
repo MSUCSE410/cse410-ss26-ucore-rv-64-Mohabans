@@ -2,6 +2,7 @@
 #include "defs.h"
 #include "loader.h"
 #include "trap.h"
+#include "timer.h"
 #include "vm.h"
 #include "queue.h"
 
@@ -37,6 +38,13 @@ void proc_init()
 		p->state = UNUSED;
 		p->kstack = (uint64)kstack[p - pool];
 		p->trapframe = (struct trapframe *)trapframe[p - pool];
+		p->task_info.status = UnInit;
+		memset(p->task_info.syscall_times, 0, sizeof(p->task_info.syscall_times));
+		p->task_info.time = 0;
+
+		p->stride = 0;
+		p->prio = 16;
+		p->pass = BIG_STRIDE / p->prio;
 	}
 	idle.kstack = (uint64)boot_stack_top;
 	idle.pid = IDLE_PID;
@@ -52,14 +60,29 @@ int allocpid()
 
 struct proc *fetch_task()
 {
-	int index = pop_queue(&task_queue);
-	if (index < 0) {
+		if (task_queue.empty == 1) {
 		debugf("No task to fetch\n");
-		return NULL;
+        return NULL;
 	}
-	debugf("fetch task %d(pid=%d) from task queue\n", index,
-	       pool[index].pid);
-	return pool + index;
+
+	int front = task_queue.front;
+    int current = (task_queue.front + 1) % QUEUE_SIZE;
+    while (current != task_queue.tail) {
+        if (pool[task_queue.data[current]].stride < pool[task_queue.data[front]].stride) {
+            front = current;
+        }
+        current = (current + 1) % QUEUE_SIZE;
+    }
+
+	// move chosen (front) to front and pop it
+    int tmp = task_queue.data[front];
+    task_queue.data[front] = task_queue.data[task_queue.front];
+    task_queue.data[task_queue.front] = tmp;
+
+	int index = pop_queue(&task_queue);
+    pool[index].stride += pool[index].pass;
+
+    return &pool[index]; // return proc
 }
 
 void add_task(struct proc *p)
@@ -96,6 +119,9 @@ found:
 	memset((void *)p->files, 0, sizeof(struct file *) * FD_BUFFER_SIZE);
 	p->context.ra = (uint64)usertrapret;
 	p->context.sp = p->kstack + KSTACK_SIZE;
+	p->stride = 0;
+	p->prio = 16;
+	p->pass = BIG_STRIDE / p->prio;
 	return p;
 }
 
@@ -119,27 +145,27 @@ void scheduler()
 {
 	struct proc *p;
 	for (;;) {
-		/*int has_proc = 0;
+		struct proc *min_proc = NULL;
+
+		// Select the proc with the smallest stride
 		for (p = pool; p < &pool[NPROC]; p++) {
 			if (p->state == RUNNABLE) {
-				has_proc = 1;
-				tracef("swtich to proc %d", p - pool);
-				p->state = RUNNING;
-				current_proc = p;
-				swtch(&idle.context, &p->context);
+				if (min_proc == NULL || p->stride < min_proc->stride)
+					min_proc = p;
 			}
 		}
-		if(has_proc == 0) {
-			panic("all app are over!\n");
-		}*/
-		p = fetch_task();
-		if (p == NULL) {
+
+		if (min_proc == NULL) {
 			panic("all app are over!\n");
 		}
-		tracef("swtich to proc %d", p - pool);
-		p->state = RUNNING;
-		current_proc = p;
-		swtch(&idle.context, &p->context);
+
+		// Update stride with current pass
+		min_proc->stride += min_proc->pass;
+
+		min_proc->state = RUNNING;
+
+		current_proc = min_proc;
+		swtch(&idle.context, &min_proc->context);
 	}
 }
 
@@ -162,7 +188,7 @@ void sched()
 void yield()
 {
 	current_proc->state = RUNNABLE;
-	add_task(current_proc);
+	// add_task(current_proc);
 	sched();
 }
 
@@ -216,7 +242,7 @@ int fork()
 	np->trapframe->a0 = 0;
 	np->parent = p;
 	np->state = RUNNABLE;
-	add_task(np);
+	// add_task(np);
 	return np->pid;
 }
 
@@ -297,7 +323,7 @@ int wait(int pid, int *code)
 			return -1;
 		}
 		p->state = RUNNABLE;
-		add_task(p);
+		// add_task(p);
 		sched();
 	}
 }

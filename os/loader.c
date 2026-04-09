@@ -3,7 +3,25 @@
 #include "file.h"
 #include "trap.h"
 
+static int app_num;
+static uint64 *app_info_ptr;
 extern char INIT_PROC[];
+char names[MAX_APP_NUM][MAX_STR_LEN];
+
+int get_id_by_name(char *name)
+{
+	for (int i = 0; i < app_num; ++i) {
+		if (strncmp(name, names[i], 100) == 0)
+			return i;
+	}
+	warnf("Cannot find such app %s", name);
+	return -1;
+}
+
+int loader(int app_id, struct proc *p)
+{
+	return bin_loader((struct inode *)app_info_ptr[app_id], p);
+}
 
 int bin_loader(struct inode *ip, struct proc *p)
 {
@@ -44,6 +62,15 @@ int bin_loader(struct inode *ip, struct proc *p)
 	p->trapframe->epc = va_start;
 	p->max_page = PGROUNDUP(p->ustack + USTACK_SIZE - 1) / PAGE_SIZE;
 	p->state = RUNNABLE;
+
+	p->task_info.status = UnInit;
+	memset(p->task_info.syscall_times, 0, sizeof(p->task_info.syscall_times));
+	p->task_info.time = 0;
+
+	p->stride = 0;
+	p->prio = 16;
+	p->pass = BIG_STRIDE / p->prio;
+
 	return 0;
 }
 
