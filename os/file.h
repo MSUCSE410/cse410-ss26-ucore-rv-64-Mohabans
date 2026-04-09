@@ -18,7 +18,17 @@ struct inode {
 	uint size;
 	uint addrs[NDIRECT + 1];
 	// LAB4: You may need to add link count here
+	uint nlink;
 };
+
+// File status structure from Project 4 specs
+typedef struct {
+    uint64 dev;     // drive number of the disk where the file is located, to be 0
+    uint64 ino;     // inode The inode number where the inode file is located
+    uint32 mode;    // file Type
+    uint32 nlink;   // the number of hard links, initially 1
+	uint64 pad[7];
+} Stat;
 
 // Defines a file in memory that provides information about the current use of the file and the corresponding inode location
 struct file {

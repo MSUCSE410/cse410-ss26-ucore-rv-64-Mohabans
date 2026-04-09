@@ -114,6 +114,7 @@ struct inode *ialloc(uint dev, short type)
 		if (dip->type == 0) { // a free inode
 			memset(dip, 0, sizeof(*dip));
 			dip->type = type;
+			dip->nlink = 1;
 			bwrite(bp);
 			brelse(bp);
 			return iget(dev, inum);
@@ -137,6 +138,7 @@ void iupdate(struct inode *ip)
 	dip->type = ip->type;
 	dip->size = ip->size;
 	// LAB4: you may need to update link count here
+	dip->nlink = ip->nlink;
 	memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
 	bwrite(bp);
 	brelse(bp);
@@ -189,7 +191,16 @@ void ivalid(struct inode *ip)
 		dip = (struct dinode *)bp->data + ip->inum % IPB;
 		ip->type = dip->type;
 		ip->size = dip->size;
-		// LAB4: You may need to get lint count here
+		
+		// Read the link count from disk
+		ip->nlink = dip->nlink;
+		
+		// THE FIX: Protect pre-installed files created by mkfs!
+		// If the disk says the file exists but has 0 links, force it to 1.
+		if (ip->type != 0 && ip->nlink == 0) {
+			ip->nlink = 1;
+		}
+		
 		memmove(ip->addrs, dip->addrs, sizeof(ip->addrs));
 		brelse(bp);
 		ip->valid = 1;
@@ -208,7 +219,7 @@ void ivalid(struct inode *ip)
 void iput(struct inode *ip)
 {
 	// LAB4: Unmark the condition and change link count variable name (nlink) if needed
-	if (ip->ref == 1 && ip->valid && 0 /*&& ip->nlink == 0*/) {
+	if (ip->ref == 1 && ip->valid && ip->nlink == 0) {
 		// inode has no links and no other references: truncate and free.
 		itrunc(ip);
 		ip->type = 0;
@@ -352,6 +363,43 @@ int writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
 	iupdate(ip);
 
 	return tot;
+}
+
+// Remove a directory entry.
+int dirremove(struct inode *dp, char *name) {
+    uint off;
+    struct dirent de;
+
+    //Ensure the inode we are operating on is actually a directory
+    if (dp->type != T_DIR) {
+        return -1;
+    }
+
+    //Iterate through the directory entries using the directory's size
+    for (off = 0; off < dp->size; off += sizeof(de)) {
+        
+        // Read the directory entry from the disk into 'de'
+        // readi args: inode, user_dst (0 for kernel), dest address, offset, length
+        if (readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de)) {
+            panic("dirremove: readi");
+        }
+
+        //If we find an active entry (inum != 0) with a matching name
+        if (de.inum != 0 && strncmp(de.name, name, DIRSIZ) == 0) {
+            
+            // Clear the inode number to mark the entry as free/deleted
+            de.inum = 0;
+            
+            // Write the cleared entry back to the exact same offset on disk
+            if (writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de)) {
+                panic("dirremove: writei");
+            }
+            
+            return 0;
+        }
+    }
+
+    return -1; // File entry not found in this directory
 }
 
 // Look for a directory entry in a directory.

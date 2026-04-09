@@ -6,6 +6,8 @@
 #include "timer.h"
 #include "trap.h"
 #include "vm.h"
+#include "file.h"
+#include "fs.h"
 
 uint64 console_write(uint64 va, uint64 len)
 {
@@ -306,20 +308,116 @@ uint64 sys_close(int fd)
 	return 0;
 }
 
-int sys_fstat(int fd,uint64 stat){
-	//TODO: your job is to complete the syscall
-	return -1;
+int sys_fstat(int fd, uint64 stat) {
+    if (fd < 0 || fd > FD_BUFFER_SIZE) return -1;
+    
+    struct proc *p = curr_proc();
+    struct file *f = p->files[fd];
+    
+    // Check if file descriptor exists and is an inode
+    if (f == NULL || f->type != FD_INODE) return -1; 
+
+    struct inode *ip = f->ip;
+    ivalid(ip); // Ensure inode is loaded from disk
+
+    Stat st;
+    st.dev = 0;           // Per assignment specs
+    st.ino = ip->inum;
+    st.mode = (ip->type == T_DIR) ? 0x040000 : 0x10000; 
+    st.nlink = ip->nlink;
+    
+    // Copy the struct out to user space
+    if (copyout(p->pagetable, stat, (char *)&st, sizeof(st)) < 0) {
+        return -1;
+    }
+    
+    return 0;
 }
 
-int sys_linkat(int olddirfd, uint64 oldpath, int newdirfd, uint64 newpath, uint64 flags){
-	//TODO: your job is to complete the syscall
-	return -1;
+int sys_linkat(int olddirfd, uint64 oldpath, int newdirfd, uint64 newpath, uint64 flags) {
+    char old_str[MAX_STR_LEN];
+    char new_str[MAX_STR_LEN];
+    struct proc *p = curr_proc();
+
+    if (copyinstr(p->pagetable, old_str, oldpath, MAX_STR_LEN) < 0) return -1;
+    if (copyinstr(p->pagetable, new_str, newpath, MAX_STR_LEN) < 0) return -1;
+
+    // THE FIX: The assignment requires failing if linking a file with the same name
+    if (strncmp(old_str, new_str, MAX_STR_LEN) == 0) {
+        return -1;
+    }
+
+    struct inode *ip = namei(old_str);
+    if (ip == NULL) return -1; 
+
+    ivalid(ip); 
+    
+    if (ip->type == T_DIR) {
+        iput(ip);
+        return -1;
+    }
+
+    ip->nlink++;
+    iupdate(ip);
+
+    struct inode *dp = root_dir(); 
+    ivalid(dp);
+
+    if (dirlink(dp, new_str, ip->inum) < 0) {
+        iput(dp);
+        // Rollback on failure
+        ip->nlink--;
+        iupdate(ip);
+        iput(ip);
+        return -1;
+    }
+
+    iput(dp);
+    iput(ip);
+    
+    return 0;
 }
 
-int sys_unlinkat(int dirfd, uint64 name, uint64 flags){
-	//TODO: your job is to complete the syscall
-	return -1;
+int sys_unlinkat(int dirfd, uint64 name, uint64 flags) {
+    char path[MAX_STR_LEN];
+    struct proc *p = curr_proc();
+
+    if (copyinstr(p->pagetable, path, name, MAX_STR_LEN) < 0) return -1;
+
+    struct inode *dp = root_dir();
+    ivalid(dp);
+
+    struct inode *ip = dirlookup(dp, path, 0);
+    if (ip == NULL) {
+        iput(dp);
+        return -1; // File does not exist
+    }
+
+    ivalid(ip);
+    
+    if (ip->nlink < 1) {
+        panic("unlink: nlink < 1");
+    }
+
+    // Attempt to remove the directory entry
+    if (dirremove(dp, path) < 0) {
+        iput(ip);
+        iput(dp);
+        return -1;
+    }
+
+    iput(dp);
+
+    // Decrement link count and update disk
+    ip->nlink--;
+    iupdate(ip);
+    
+    // iput will delete the file contents if nlink == 0 (per assignment instructions)
+    iput(ip); 
+
+    return 0;
 }
+
 
 extern char trap_page[];
 
@@ -377,6 +475,7 @@ void syscall()
 		break;
 	case SYS_unlinkat:
 	    ret = sys_unlinkat(args[0],args[1],args[2]);
+		break;
 	case SYS_spawn:
 		ret = sys_spawn(args[0]);
 		break;
